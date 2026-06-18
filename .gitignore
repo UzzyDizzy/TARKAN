@@ -1,0 +1,42 @@
+# ── secrets ──
+.env.local
+.env
+
+# ── environments / caches ──
+myenv
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# ── source material (heavy / licensed) ──
+TARKAN.pdf
+referred_papers
+CLAUDE.md
+.claude
+
+# ── data, models, KG dumps, indices (heavy) ──
+data/
+results/checkpoints/
+results/logs/
+*.pt
+*.bin
+*.safetensors
+*.pth
+*.h5
+*.npy
+*.npz
+*.csv.gz
+
+# ── heavy contents inside cloned baselines (keep source, drop weights/data/features) ──
+referred_clones/**/data/
+referred_clones/**/datasets/
+referred_clones/**/*.pt
+referred_clones/**/*.bin
+referred_clones/**/*.safetensors
+referred_clones/**/*.pth
+referred_clones/**/*.h5
+referred_clones/**/*.npy
+referred_clones/**/*.npz
+referred_clones/**/checkpoints/
+referred_clones/**/pretrained*/
+referred_clones/**/.git/

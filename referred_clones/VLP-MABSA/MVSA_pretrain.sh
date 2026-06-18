@@ -1,0 +1,13 @@
+python pretrain.py \
+          --dataset MVSA ./src/data/jsons/MVSA_info.json \
+          --checkpoint_dir ./checkpoint \
+          --model_config config/pretrain_base.json \
+          --mlm_enabled 1 \
+          --mrm_enabled 1 \
+          --senti_enabled 1 \
+          --anp_generate_enabled 1 \
+          --ae_oe_enabled 1 \
+          --log_dir logs \
+          --epochs 41 \
+          --mrm_loss_type KL \
+          --task pretrain
