@@ -43,6 +43,8 @@ def main():
     ap.add_argument("--skip-senticnet", action="store_true")
     ap.add_argument("--skip-kg", action="store_true")
     ap.add_argument("--senticnet-rdf", default=None, help="path to official SenticNet 7 RDF/XML")
+    ap.add_argument("--senticnet-py", default=None, help="path to official senticnet.py (default: auto-find data/senticnet/senticnet.py)")
+    ap.add_argument("--senticnet-git", default=None, help="git URL to fetch senticnet.py from if not present locally")
     ap.add_argument("--teacher", action="store_true", help="also run teacher labeling (GPU)")
     ap.add_argument("--datasets", nargs="+", default=["twitter2015", "twitter2017"])
     ap.add_argument("--device", default="cpu")
@@ -56,6 +58,11 @@ def main():
         sn = [S / "download_senticnet.py"]
         if args.senticnet_rdf:
             sn += ["--rdf", args.senticnet_rdf]
+        elif args.senticnet_py:
+            sn += ["--py", args.senticnet_py]
+        elif args.senticnet_git:
+            sn += ["--git", args.senticnet_git]
+        # else: download_senticnet auto-finds data/senticnet/senticnet.py
         run(sn, "3/5 SenticNet 7 (EN)")
     if not args.skip_kg:
         run([S / "build_kg.py"], "4/5 build unified KG index")

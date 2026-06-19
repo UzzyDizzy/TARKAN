@@ -98,9 +98,13 @@ Legend: 🔧 = decision implemented · ⚙️ = configurable in `config.py` · �
 - **Fix:** linear warmup 10% + linear decay, patience 5, grad-clip 1.0, weight_decay 0.01. → `train.py`, `config`.
 
 ### B4. SenticNet version & distribution 🔧⚙️
-- **Missing:** paper cites SenticNet 7 [20]; the easy `pip senticnet` package ships SenticNet-5-era data.
-- **Fix:** preferred path parses the **official SenticNet 7 RDF/XML** (`--rdf`); `pip senticnet` is a
-  flagged fallback. → `scripts/download_senticnet.py`.
+- **Missing:** paper cites SenticNet 7 [20]; the easy `pip senticnet` package ships SenticNet-5-era
+  data (and isn't installed here — it raised `ModuleNotFoundError`).
+- **Fix:** **single canonical source = the official `senticnet.py` dump at `data/senticnet/senticnet.py`**
+  (SenticNet 7; 292,357 EN concepts). `download_senticnet.py` parses it with a tolerant line reader
+  (the official file has a few malformed emoticon keys → skipped; they normalize to empty KG keys
+  anyway). Auto-found by `data_setup.py`; `--py` / `--git <url>` / `--rdf` are alternatives. The pip
+  package path was removed. → `scripts/download_senticnet.py`.
 
 ### B5. ConceptNet version 🔧📄
 - **Missing:** the citation [21] is ConceptNet 5.5; the paper doesn't pin a download.

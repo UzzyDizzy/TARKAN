@@ -36,14 +36,23 @@ python -m pytest tests/ -q       # expect: 23 passed
 Downloads datasets/images, ConceptNet 5.7 (EN) + Numberbatch, SenticNet 7 (EN), and
 builds the KG sqlite index. **None of this is git-pushed.**
 
+**SenticNet 7 is local, single-source.** Put the official `senticnet.py` data module at
+`data/senticnet/senticnet.py` (it's the one canonical dump — full sentic dims + polarity +
+semantics; the pip `senticnet` package is *not* used). `data_setup.py` auto-finds it. If it's
+not present on a fresh machine, fetch it with `--senticnet-git <repo_url>` or point at a copy
+with `--senticnet-py /path/senticnet.py` (or parse the official RDF with `--senticnet-rdf`).
+
 ```bash
 python data_setup.py                              # steps 1-4 (CPU-OK, ~10 GB transient disk for ConceptNet)
-# For SenticNet 7 fidelity, download the RDF from https://sentic.net/downloads/ then:
-python data_setup.py --skip-data --skip-conceptnet --senticnet-rdf /path/senticnet7.rdf
+# alternatives if senticnet.py isn't already at data/senticnet/:
+#   python data_setup.py --skip-data --skip-conceptnet --senticnet-py /path/senticnet.py
+#   python data_setup.py --skip-data --skip-conceptnet --senticnet-git <repo_url>
 ```
 Produces: `data/twitter2015|twitter2017/*.tsv`, `data/images/...`, `data/conceptnet/conceptnet_en.parquet`,
 `data/conceptnet/numberbatch-en.txt`, `data/senticnet/senticnet_en.parquet`, `data/kg_index/kg.sqlite`.
 The script prints Table-2 record-count checks (3179/1122/1037 and 3562/1176/1234).
+Timings on this T4: ConceptNet parse ~minutes, **SenticNet parse ~1 s, KG index build ~2 min**
+(5.1M triples: 3.42M ConceptNet + 1.69M SenticNet, + 292K polarities).
 
 ---
 

@@ -107,6 +107,15 @@ class LLMTeacher:
         if self.device != "cuda":
             self._model = self._model.to(self.device)
         self._model.eval()
+        # We decode greedily (do_sample=False). Clear the model's default sampling params
+        # so transformers doesn't warn about temperature/top_p/top_k on every call.
+        gc = self._model.generation_config
+        gc.do_sample = False
+        gc.temperature = None
+        gc.top_p = None
+        gc.top_k = None
+        if gc.pad_token_id is None and self._tok.pad_token_id is not None:
+            gc.pad_token_id = self._tok.pad_token_id
 
     def _ask(self, system: str, user: str) -> int:
         import torch
