@@ -62,9 +62,10 @@ def predict_masc(model, loader, device: str = None) -> Tuple[List[str], List[str
         out = model(batch)
         asc = out["asc_logits"]
         order = [(b, k) for b in range(len(batch["aspect_spans"])) for k in range(len(batch["aspect_spans"][b]))]
+        # asc rows must line up 1:1 with `order` (the flattened aspect list). If a future
+        # change drops aspects inside forward(), fail loudly rather than silently skew MASC.
+        assert asc.size(0) == len(order), f"asc rows {asc.size(0)} != aspects {len(order)}"
         for a, (b, k) in enumerate(order):
-            if a >= asc.size(0):
-                break
             y_true.append(ID2POL[batch["aspect_polarity"][b][k]])
             y_pred.append(ID2POL[int(asc[a].argmax().item())])
     return y_true, y_pred

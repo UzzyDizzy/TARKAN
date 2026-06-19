@@ -4,20 +4,33 @@
 
 # ── environments / caches ──
 myenv
+venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+.cache/
+
+# ── IDE / editor / Lightning-studio server junk ──
+.idea/
+.vscode/
+.vscode-server
+.cursor-server
+.windsurf-server
+.lightning_studio/
+.lightningignore
+.bash_history
+.claude.json
 
 # ── source material (heavy / licensed) ──
 TARKAN.pdf
+TARKAN_latex/
 referred_papers
 CLAUDE.md
 .claude
 
 # ── data, models, KG dumps, indices (heavy) ──
 data/
-results/checkpoints/
-results/logs/
+results/
 *.pt
 *.bin
 *.safetensors

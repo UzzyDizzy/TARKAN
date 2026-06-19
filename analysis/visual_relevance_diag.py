@@ -19,7 +19,9 @@ from metrics import joint_prf  # noqa: E402
 from models import TarkanStudent  # noqa: E402
 from train import build_kg, make_loader  # noqa: E402
 from teacher import TeacherCache  # noqa: E402
-from utils import load_checkpoint  # noqa: E402
+from utils import load_checkpoint, get_logger  # noqa: E402
+
+log = get_logger("visual_relevance_diag")
 
 
 def _bucket(inst, cache, captions):
@@ -48,15 +50,23 @@ def main():
     rows = []
     for ds in args.datasets:
         cfg = replace(CONFIG, device=args.device)
-        model = TarkanStudent(cfg, kg=build_kg()).to(cfg.device)
         ck = cfg.paths.checkpoints / f"{ds}_best.pt"
-        if ck.exists():
-            load_checkpoint(model, ck, map_location=cfg.device)
+        if not ck.exists():
+            log.warning(f"NO checkpoint at {ck}; skipping {ds} (untrained model -> meaningless buckets). "
+                        f"Run: python train.py --dataset {ds} --device {args.device}")
+            continue
+        model = TarkanStudent(cfg, kg=build_kg()).to(cfg.device)
+        load_checkpoint(model, ck, map_location=cfg.device)
         loader = make_loader(ds, "test", cfg, shuffle=False)
         preds, golds = predict_joint(model, loader, cfg.device)
         insts = load_split(cfg.paths.data / ds, "test")
         cache = TeacherCache.load(ds)
+        if not cache.rel:
+            log.warning(f"no teacher relevance labels for {ds} -> 'image-useful'/'image-irrelevant' "
+                        f"buckets will be empty (run teacher labeling first).")
         captions = load_captions(ds)
+        if not captions:
+            log.warning(f"no cached captions for {ds} -> 'weak image-text correspondence' bucket will be empty.")
 
         buckets = {}
         for i, inst in enumerate(insts):

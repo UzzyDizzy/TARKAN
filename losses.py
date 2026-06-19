@@ -80,7 +80,7 @@ def compute_losses(outputs: Dict, targets: Dict, cfg=CONFIG) -> Dict[str, torch.
     """Returns dict with l_tag, l_rel, l_kg, l_asc, total (Eq. 25 + aux)."""
     l_tag = tag_loss(outputs["tag_logits"], targets["bio_labels"])
 
-    if cfg.use_teacher and cfg.use_relevance and "teacher_relevance" in targets:
+    if cfg.use_teacher and cfg.use_relevance and cfg.use_visual_stream and "teacher_relevance" in targets:
         l_rel = relevance_loss(
             outputs["relevance"], targets["teacher_relevance"], targets.get("teacher_relevance_mask")
         )

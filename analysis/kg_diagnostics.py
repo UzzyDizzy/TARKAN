@@ -16,15 +16,19 @@ sys.path.insert(0, str(ROOT))
 from config import CONFIG  # noqa: E402
 from train import make_loader, build_kg  # noqa: E402
 from models import TarkanStudent  # noqa: E402
-from utils import load_checkpoint  # noqa: E402
+from evaluate import _to_device  # noqa: E402
+from utils import load_checkpoint, get_logger  # noqa: E402
+
+log = get_logger("kg_diagnostics")
 
 
 @torch.no_grad()
-def diagnose(model, loader, thresh=0.5):
+def diagnose(model, loader, thresh=0.5, device=None):
+    device = device or CONFIG.device
     n_aspects = matched = retrieved = retained = 0
     src = {"conceptnet": 0, "senticnet": 0}
     for batch in loader:
-        out = model(batch)
+        out = model(_to_device(batch, device))
         for a, triples in enumerate(out["kg_triples"]):
             n_aspects += 1
             retrieved += len(triples)
@@ -54,17 +58,27 @@ def main():
     ap.add_argument("--device", default=CONFIG.device)
     args = ap.parse_args()
 
+    kg = build_kg()
+    if kg is None:
+        log.warning(f"NO KG index at {CONFIG.paths.kg_index / 'kg.sqlite'}; all KG stats will be 0. "
+                    f"Build it: python data_setup.py  (step 4)")
     rows = []
     for ds in args.datasets:
         cfg = replace(CONFIG, device=args.device)
-        model = TarkanStudent(cfg, kg=build_kg()).to(cfg.device)
         ck = cfg.paths.checkpoints / f"{ds}_best.pt"
-        if ck.exists():
-            load_checkpoint(model, ck, map_location=cfg.device)
+        if not ck.exists():
+            log.warning(f"NO checkpoint at {ck}; skipping {ds} (usefulness scores would be random). "
+                        f"Run: python train.py --dataset {ds} --device {args.device}")
+            continue
+        model = TarkanStudent(cfg, kg=kg).to(cfg.device)
+        load_checkpoint(model, ck, map_location=cfg.device)
         model.eval()
-        stats = diagnose(model, make_loader(ds, "test", cfg, shuffle=False))
+        stats = diagnose(model, make_loader(ds, "test", cfg, shuffle=False), device=cfg.device)
         rows.append({"dataset": ds, **stats})
         print(ds, stats)
+    if not rows:
+        log.warning("no datasets diagnosed (all skipped); nothing written.")
+        return
     out = ROOT / "results" / "tables" / "kg_diagnostics.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", newline="", encoding="utf-8") as f:

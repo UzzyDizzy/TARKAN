@@ -5,7 +5,9 @@ from _common import CONFIG, ROOT, write_table
 from train import make_loader
 from evaluate import evaluate_all
 from models import TarkanStudent
-from utils import load_checkpoint
+from utils import load_checkpoint, get_logger
+
+log = get_logger("run_subtasks")
 
 
 def main():
@@ -20,9 +22,12 @@ def main():
     for ds in args.datasets:
         cfg = replace(CONFIG, device=args.device)
         ckpt = cfg.paths.checkpoints / f"{ds}_best.pt"
+        if not ckpt.exists():
+            log.warning(f"NO checkpoint at {ckpt}; skipping {ds} (an untrained model would write garbage). "
+                        f"Run: python train.py --dataset {ds} --device {args.device}")
+            continue
         model = TarkanStudent(cfg).to(cfg.device)
-        if ckpt.exists():
-            load_checkpoint(model, ckpt, map_location=cfg.device)
+        load_checkpoint(model, ckpt, map_location=cfg.device)
         loader = make_loader(ds, "test", cfg, shuffle=False)
         m = evaluate_all(model, loader, cfg.device)
         rows.append({"dataset": ds, "MATE_F1": round(m["mate"]["F1"], 2),

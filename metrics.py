@@ -77,21 +77,25 @@ def paired_bootstrap(
 ) -> Dict[str, float]:
     """Two-sided paired bootstrap p-value for (system A - system B) on `key`.
 
-    Returns observed scores, mean delta, and p (fraction of resamples where the
-    sign of the delta flips relative to the observed delta).
+    Tests H0: delta == 0 by re-centering the bootstrap delta distribution at the null
+    and measuring how often a recentered resample is at least as extreme as the observed
+    delta (with a +1/(n+1) finite-sample correction so p is never exactly 0). This is the
+    standard paired bootstrap significance test; an earlier version counted raw sign-flips
+    of the (un-centered) resample deltas, which understates p and over-awards significance.
+
+    Returns observed scores, observed delta, and the two-sided p-value.
     """
     rng = np.random.RandomState(seed)
     N = len(golds)
     obs_a = metric_fn(preds_a, golds)[key]
     obs_b = metric_fn(preds_b, golds)[key]
     obs_delta = obs_a - obs_b
-    flips = 0
-    for _ in range(n_samples):
+    deltas = np.empty(n_samples, dtype=float)
+    for s in range(n_samples):
         idx = rng.randint(0, N, size=N)
         ra = metric_fn([preds_a[i] for i in idx], [golds[i] for i in idx])[key]
         rb = metric_fn([preds_b[i] for i in idx], [golds[i] for i in idx])[key]
-        delta = ra - rb
-        if (obs_delta >= 0 and delta <= 0) or (obs_delta < 0 and delta >= 0):
-            flips += 1
-    p = flips / n_samples
+        deltas[s] = ra - rb
+    centered = deltas - deltas.mean()  # shift resample distribution to the H0 null (delta=0)
+    p = (1.0 + float(np.sum(np.abs(centered) >= abs(obs_delta)))) / (n_samples + 1.0)
     return {f"{key}_A": obs_a, f"{key}_B": obs_b, "delta": obs_delta, "p_value": p, "significant": bool(p < 0.05)}
