@@ -55,11 +55,18 @@ Legend: 🔧 = decision implemented · ⚙️ = configurable in `config.py` · �
 - **Paper:** the relevance prompt consumes an "image description" but never says how it is produced.
 - **Fix:** BLIP caption (`Salesforce/blip-image-captioning-large`), cached. → `captioner.py`, `config.captioner_id`.
 
-### A8. Inference: joint output vs. ASC head 🔧📄
+### A8. Inference: joint output vs. ASC head 🔧⚙️
 - **Paper:** has both a BIO suffix polarity (Eq. 21) and an auxiliary ASC head (Eq. 23);
-  which yields the *final* joint polarity at inference is ambiguous.
-- **Fix:** joint MABSA output = **BIO-decoded `(span, polarity)` pairs** (default, §9); the ASC
-  head is used for the **MASC** subtask and as auxiliary supervision. → `evaluate.predict_joint` / `predict_masc`.
+  which yields the *final* joint polarity at inference is ambiguous. §3.7 ("…fused through the
+  KAN module to predict the final aspect-level sentiment polarity") leans ASC; but Table 6's
+  "w/o ASC loss" = −0.7 leans BIO. The two readings reproduce different tables.
+- **Fix:** now a **config toggle** `config.joint_polarity_source ∈ {bio, asc}` (default `bio`).
+  - `bio`: span **and** polarity from the BIO head (text only). Visual/KG/KAN affect joint F1 only
+    via training-time regularization of the shared encoder → Table-10 joint column ≈ flat.
+  - `asc`: span from BIO; **final polarity from the KAN-fused ASC head (Eq. 23) re-run on the
+    predicted spans** (paper §3.7) → lets visual/KG/KAN move Tables 6 & 10. MATE & MASC unchanged.
+  - Run both on one trained checkpoint and keep whichever reproduces the paper.
+  → `evaluate.predict_joint` (two-stage when `asc`), `config.joint_polarity_source`.
 
 ### A9. Visual-relevance condition buckets (Table 9) 🔧
 - **Paper:** reports F1 for "image-useful / image-irrelevant / weak image–text correspondence /

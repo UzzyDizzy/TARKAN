@@ -121,6 +121,13 @@ class TarkanConfig:
     use_kg_stream: bool = True        # --no-kg-stream
     use_visual_stream: bool = True    # --no-visual-stream
 
+    # ---- inference: joint-MABSA polarity source (queries.md A8) ----
+    # 'bio'  -> joint (span, polarity) both read from the BIO tagging head (text only) [default].
+    # 'asc'  -> span from BIO; FINAL polarity from the KAN-fused ASC head (Eq. 23) re-run on the
+    #           predicted spans (paper §3.7 inference). Needed to let visual/KG/KAN move the joint
+    #           metric in Tables 6 & 10. Does not affect MATE (spans) or the MASC subtask.
+    joint_polarity_source: str = "bio"
+
     # ---- runtime ----
     seed: int = 42
     device: str = "cpu"            # set 'cuda' on the T4 server

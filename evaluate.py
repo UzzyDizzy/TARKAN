@@ -35,19 +35,91 @@ def decode_word_tags(tag_logits_b: torch.Tensor, word_ids: List[int], n_words: i
     return word_tag
 
 
+def _pred_subspans_for(word_ids, span):
+    """Map a predicted WORD span (s,e_excl) -> subtoken index range (mirrors data._subtoken_spans)."""
+    s, e, *_ = span
+    idxs = [i for i, wid in enumerate(word_ids) if isinstance(wid, int) and wid >= 0 and s <= wid < e]
+    return (idxs[0], idxs[-1] + 1) if idxs else (0, 1)
+
+
 @torch.no_grad()
 def predict_joint(model, loader, device: str = None) -> Tuple[List, List]:
+    """Joint MABSA (span, polarity) per instance.
+
+    Spans always come from the BIO tagging head. The final polarity source is
+    cfg.joint_polarity_source (queries.md A8):
+      'bio' -> polarity from the BIO tags (default).
+      'asc' -> polarity from the KAN-fused ASC head (Eq. 23) re-run on the PREDICTED
+               spans (paper §3.7), so visual/KG/KAN influence the joint metric.
+    """
     device = device or CONFIG.device
     model.eval()
+    mode = getattr(model.cfg, "joint_polarity_source", "bio")
     preds, golds = [], []
+
+    id2inst, captions = {}, {}
+    if mode == "asc":
+        from data import opinion_words, visual_concepts  # lazy: rebuild KG queries for predicted spans
+        from kg_retrieval import AspectQuery
+        ds = getattr(loader, "dataset", None)
+        for inst in (getattr(ds, "instances", None) or []):
+            id2inst[inst.id] = inst
+        captions = getattr(ds, "captions", None) or {}
+
     for batch in loader:
         batch = _to_device(batch, device)
         text_feats = model.text_encoder(batch["input_ids"], batch["attention_mask"])
         tag_logits = model.bio_head(text_feats)  # [B, n, 7]
-        for b in range(tag_logits.size(0)):
+        B = tag_logits.size(0)
+
+        batch_spans = []
+        for b in range(B):
             wt = decode_word_tags(tag_logits[b], batch["word_ids"][b], batch["n_words"][b])
-            preds.append([(s, e, pol) for (s, e, pol) in bio_to_spans(wt)])
+            batch_spans.append(bio_to_spans(wt))
             golds.append([(s, e, pol) for (s, e, pol) in batch["gold_aspects"][b]])
+
+        if mode != "asc":
+            for spans in batch_spans:
+                preds.append([(s, e, pol) for (s, e, pol) in spans])
+            continue
+
+        # --- 'asc': re-decode polarity from the fused ASC head over the predicted spans ---
+        visual_feats = None
+        if model.cfg.use_visual_stream and model.visual_encoder is not None and "pixel_values" in batch:
+            visual_feats = model.visual_encoder(batch["pixel_values"])
+
+        sub_spans, queries = [], []
+        for b in range(B):
+            inst = id2inst.get(batch["instance_id"][b])
+            tokens = inst.tokens if inst is not None else None
+            vc = visual_concepts(captions.get(inst.image_id, "")) if inst is not None else []
+            subs, qs = [], []
+            for sp in batch_spans[b]:
+                subs.append(_pred_subspans_for(batch["word_ids"][b], sp))
+                s, e = sp[0], sp[1]
+                if tokens is not None:
+                    qs.append(AspectQuery(aspect_term=" ".join(tokens[s:e]),
+                                          opinion_words=opinion_words(tokens, (s, e)), visual_concepts=vc))
+                else:
+                    qs.append(AspectQuery(aspect_term=""))
+            sub_spans.append(subs)
+            queries.append(qs)
+
+        mod = dict(batch)
+        mod["aspect_spans"] = sub_spans
+        mod["aspect_queries"] = queries
+        mod.pop("aspect_triples", None)
+        out = model(mod, text_feats=text_feats, visual_feats=visual_feats)
+        asc = out["asc_logits"]  # rows flattened over (b, k) in instance order
+
+        a = 0
+        for b in range(B):
+            inst_preds = []
+            for (s, e, pol_bio) in batch_spans[b]:
+                pol = ID2POL[int(asc[a].argmax().item())] if a < asc.size(0) else pol_bio
+                a += 1
+                inst_preds.append((s, e, pol))
+            preds.append(inst_preds)
     return preds, golds
 
 

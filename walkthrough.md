@@ -91,6 +91,14 @@ python ablations/run_ablations.py       --device cuda   # -> ablation_components
 python ablations/run_fusion_ablation.py --device cuda   # -> ablation_fusion.csv     (7 fusions, Table 10)
 ```
 
+> **Joint-polarity source (Tables 6 & 10).** The joint metric's polarity comes from
+> `config.joint_polarity_source` (default `bio`). With `bio`, the fusion/visual/KG branch only
+> affects joint-F1 indirectly, so Table 10's joint column is ~flat across fusion strategies and
+> Table 6's visual/KG drops are muted. To make the multimodal components move the **joint** metric
+> (paper §3.7 inference), set `joint_polarity_source='asc'` — span from BIO, final polarity from the
+> KAN-fused ASC head. Run the ablations under **both** settings and keep whichever matches the paper.
+> (Requires the built KG index, else the two KG ablations are no-ops — see §1.)
+
 ## 6. Diagnostics  (Tables 5, 7, 8, 9)
 
 ```bash
