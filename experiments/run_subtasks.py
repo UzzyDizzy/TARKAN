@@ -3,7 +3,7 @@ from dataclasses import replace
 
 from _common import CONFIG, ROOT, write_table
 from train import make_loader
-from evaluate import evaluate_all
+from evaluate import evaluate_all, _build_kg_and_entities
 from models import TarkanStudent
 from utils import load_checkpoint, get_logger
 
@@ -26,7 +26,8 @@ def main():
             log.warning(f"NO checkpoint at {ckpt}; skipping {ds} (an untrained model would write garbage). "
                         f"Run: python train.py --dataset {ds} --device {args.device}")
             continue
-        model = TarkanStudent(cfg).to(cfg.device)
+        kg, ent = _build_kg_and_entities(cfg)
+        model = TarkanStudent(cfg, kg=kg, entity_embedder=ent).to(cfg.device)
         load_checkpoint(model, ckpt, map_location=cfg.device)
         loader = make_loader(ds, "test", cfg, shuffle=False)
         m = evaluate_all(model, loader, cfg.device)

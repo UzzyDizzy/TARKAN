@@ -38,8 +38,7 @@ def test_forward_shapes_full_path():
     model = TarkanStudent(cfg, build_encoders=False, kg=kg)
     batch, tf, vf = _synthetic_batch()
     out = model(batch, text_feats=tf, visual_feats=vf)
-    assert out["tag_logits"].shape == (2, 6, 7)
-    assert out["asc_logits"].shape == (2, 3)
+    assert out["tag_logits"].shape == (2, 6, 7)   # unified BIO head over KAN-fused token reps
     assert out["relevance"].shape == (2,)
     assert len(out["kg_scores"]) == 2
 

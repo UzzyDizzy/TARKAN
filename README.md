@@ -11,43 +11,17 @@ Kolmogorov–Arnold Network fusion head. Exact formulas (Eqs. 1–25) and §4.3 
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph IN[Image-Text Input]
-      T["Tweet text T"]
-      I["Image I"]
-    end
-    T --> TE["BERTweet Text Encoder<br/>H_t (Eq.4)"]
-    I --> VE["CLIP-ViT Visual Encoder<br/>V (Eq.5)"]
-    TE --> AR["Aspect Rep t_k (Eq.6)"]
-    AR --> AVR["Aspect-Visual Relevance<br/>r_k, ṽ_k (Eqs.7-10)"]
-    VE --> AVR
-    AR --> KGR["Aspect-Centered KG Retrieval<br/>g_kq (Eqs.12-14)"]
-    KG[("SenticNet 7 + ConceptNet 5.7")] --> KGR
-    KGR --> KGF["Teacher-Guided KG Filter<br/>s_kq, g̃_k (Eqs.15-17)"]
-    AR --> FUSE["KAN Fusion z_k (Eqs.18-20)"]
-    AVR -->|ṽ_k| FUSE
-    KGF -->|g̃_k| FUSE
-    TE --> BIO["BIO Tagging Head (Eq.21)"]
-    FUSE --> ASC["Span ASC Head (Eq.23)"]
-    BIO --> OUT["Aspect–Sentiment Pairs<br/>(Klay Thompson, POS) ..."]
-    ASC --> OUT
+![TARKAN architecture](assets/tarkan_architecture.png)
 
-    subgraph TEACH["Offline LLM Teacher — training-time only (removed at inference)"]
-      CAP["BLIP caption → image description"]
-      RT["relevance label r^T (Table 4)"]
-      KGT["KG usefulness label s^T (Table 4)"]
-    end
-    CAP -.-> RT
-    RT -. "L_rel (Eq.11)" .-> AVR
-    KGT -. "L_kg (Eq.16)" .-> KGF
-
-    classDef teacher fill:#fff3e0,stroke:#e65100,stroke-dasharray:5 5;
-    class TEACH,CAP,RT,KGT teacher;
-```
-
-Solid = student (used at train **and** inference). Dashed = LLM-teacher supervision (train only).
-Objective: `L = L_tag + λ1·L_rel + λ2·L_kg + λ3·L_asc` (Eq. 25 + auxiliary; `λ1=λ2=0.5`, `λ3=1.0`).
+*Overall TARKAN architecture (figure from the paper, `TARKAN_latex/TARKAN.pdf`). The offline LLM
+teacher (training-time only, removed at inference) supervises aspect–visual relevance and KG
+evidence filtering. The student encodes text+image, estimates aspect–visual relevance, retrieves
+and filters aspect-centered KG evidence, fuses text + relevance-filtered visual + filtered KG via
+the KAN module, and predicts unified BIO aspect–sentiment tags.*
+Objective: `L = L_tag + λ1·L_rel + λ2·L_kg` (§3.7; `λ1=λ2=0.5`). The **unified BIO head** (Eq. 21)
+runs on the KAN-fused token representation `h̃_i` and performs *both* aspect extraction and sentiment
+classification — there is no separate ASC head. Inference is two-stage (§3.8): extract spans, then
+re-fuse aspect-relevant visual+KG evidence and re-tag for the final polarity.
 
 ## Repository layout
 

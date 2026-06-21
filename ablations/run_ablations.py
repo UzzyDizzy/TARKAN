@@ -1,8 +1,9 @@
 """Table 6 — component ablations. Each variant toggles exactly one mechanism.
 
-Variants (paper Table 6):
-  TARKAN | w/o LLM teacher | w/o aspect-visual relevance | w/o KG evidence filtering
-  | w/o KG stream | w/o KAN fusion (MLP) | w/o visual stream | w/o auxiliary ASC loss
+Variants (updated paper Table 6):
+  TARKAN | w/o LLM teacher guidance | w/o aspect-visual relevance | w/o KG evidence filtering
+  | w/o KG stream | w/o KAN fusion (MLP) | w/o visual stream
+  | w/o KAN-enhanced tag representation
 """
 import csv
 import sys
@@ -20,13 +21,13 @@ log = get_logger("run_ablations")
 
 VARIANTS = {
     "TARKAN": {},
-    "w/o LLM teacher": {"use_teacher": False},
+    "w/o LLM teacher guidance": {"use_teacher": False},
     "w/o aspect-visual relevance": {"use_relevance": False},
     "w/o KG evidence filtering": {"use_kg_filter": False},
     "w/o KG stream": {"use_kg_stream": False},
-    "w/o KAN fusion (MLP)": {"fusion": "concat_mlp"},
+    "w/o KAN fusion, MLP fusion": {"fusion": "concat_mlp"},
     "w/o visual stream": {"use_visual_stream": False},
-    "w/o auxiliary ASC loss": {"lambda3": 0.0},
+    "w/o KAN-enhanced tag representation": {"use_kan_tag_representation": False},
 }
 
 

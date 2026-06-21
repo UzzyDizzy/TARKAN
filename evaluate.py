@@ -1,7 +1,11 @@
-"""Inference + evaluation (paper Algorithm 2, §5.1).
+"""Inference + evaluation (updated paper §3.8).
 
-Joint MABSA output = BIO-decoded (span, polarity) pairs (paper §9 default). The
-auxiliary ASC head is used for the MASC subtask (polarity on gold aspects).
+Joint MABSA uses a single unified BIO head (Eq. 21) run on the KAN-fused multimodal
+token representation. Inference is two-stage (§3.8):
+  Stage 1: predict BIO tags with no aspect evidence -> extract aspect spans.
+  Stage 2: for each predicted span, compute relevance-filtered visual + filtered KG,
+           re-fuse per token via KAN, re-run the BIO head -> final aspect-level polarity.
+There is no separate ASC head; the MASC subtask reads the BIO polarity on gold aspects.
 """
 from __future__ import annotations
 
@@ -35,6 +39,24 @@ def decode_word_tags(tag_logits_b: torch.Tensor, word_ids: List[int], n_words: i
     return word_tag
 
 
+def _majority_pol(word_tags: List[str], s: int, e: int) -> str:
+    """Majority sentiment suffix over word tags in [s, e) (NEU if none)."""
+    pols = [word_tags[i].split("-", 1)[1] for i in range(s, e) if 0 <= i < len(word_tags) and word_tags[i] != "O"]
+    return max(set(pols), key=pols.count) if pols else "NEU"
+
+
+def decode_spans(word_tags: List[str]) -> List[Tuple[int, int, str]]:
+    """Boundary-first span decode (updated §3.8).
+
+    Segments aspect spans on B/O boundaries while IGNORING the polarity suffix, then
+    assigns each span its majority polarity. This avoids fragmenting a multi-word aspect
+    when the BIO head flips polarity mid-span (which otherwise costs MATE precision).
+    Gold spans are single-polarity by construction, so this only affects decoding.
+    """
+    collapsed = ["O" if t == "O" else (t.split("-", 1)[0] + "-X") for t in word_tags]
+    return [(s, e, _majority_pol(word_tags, s, e)) for (s, e, _) in bio_to_spans(collapsed)]
+
+
 def _pred_subspans_for(word_ids, span):
     """Map a predicted WORD span (s,e_excl) -> subtoken index range (mirrors data._subtoken_spans)."""
     s, e, *_ = span
@@ -44,50 +66,44 @@ def _pred_subspans_for(word_ids, span):
 
 @torch.no_grad()
 def predict_joint(model, loader, device: str = None) -> Tuple[List, List]:
-    """Joint MABSA (span, polarity) per instance.
+    """Joint MABSA (span, polarity) per instance via the two-stage unified-BIO pipeline (§3.8).
 
-    Spans always come from the BIO tagging head. The final polarity source is
-    cfg.joint_polarity_source (queries.md A8):
-      'bio' -> polarity from the BIO tags (default).
-      'asc' -> polarity from the KAN-fused ASC head (Eq. 23) re-run on the PREDICTED
-               spans (paper §3.7), so visual/KG/KAN influence the joint metric.
+    Stage 1 extracts spans from a BIO pass with no aspect evidence; Stage 2 re-runs the
+    KAN-enhanced BIO head over the predicted spans to assign the final polarity, so visual
+    and KG evidence inform the joint metric.
     """
     device = device or CONFIG.device
     model.eval()
-    mode = getattr(model.cfg, "joint_polarity_source", "bio")
+    from data import opinion_words, visual_concepts  # lazy: rebuild KG queries for predicted spans
+    from kg_retrieval import AspectQuery
+
+    ds = getattr(loader, "dataset", None)
+    id2inst = {inst.id: inst for inst in (getattr(ds, "instances", None) or [])}
+    captions = getattr(ds, "captions", None) or {}
+
     preds, golds = [], []
-
-    id2inst, captions = {}, {}
-    if mode == "asc":
-        from data import opinion_words, visual_concepts  # lazy: rebuild KG queries for predicted spans
-        from kg_retrieval import AspectQuery
-        ds = getattr(loader, "dataset", None)
-        for inst in (getattr(ds, "instances", None) or []):
-            id2inst[inst.id] = inst
-        captions = getattr(ds, "captions", None) or {}
-
     for batch in loader:
         batch = _to_device(batch, device)
         text_feats = model.text_encoder(batch["input_ids"], batch["attention_mask"])
-        tag_logits = model.bio_head(text_feats)  # [B, n, 7]
-        B = tag_logits.size(0)
-
-        batch_spans = []
-        for b in range(B):
-            wt = decode_word_tags(tag_logits[b], batch["word_ids"][b], batch["n_words"][b])
-            batch_spans.append(bio_to_spans(wt))
-            golds.append([(s, e, pol) for (s, e, pol) in batch["gold_aspects"][b]])
-
-        if mode != "asc":
-            for spans in batch_spans:
-                preds.append([(s, e, pol) for (s, e, pol) in spans])
-            continue
-
-        # --- 'asc': re-decode polarity from the fused ASC head over the predicted spans ---
         visual_feats = None
         if model.cfg.use_visual_stream and model.visual_encoder is not None and "pixel_values" in batch:
             visual_feats = model.visual_encoder(batch["pixel_values"])
+        B = text_feats.size(0)
 
+        # --- Stage 1: extract spans (no aspect evidence -> zero visual/KG) ---
+        s1 = dict(batch)
+        s1["aspect_spans"] = [[] for _ in range(B)]
+        s1.pop("aspect_queries", None)
+        s1.pop("aspect_triples", None)
+        tag1 = model(s1, text_feats=text_feats, visual_feats=visual_feats)["tag_logits"]
+
+        batch_spans = []
+        for b in range(B):
+            wt = decode_word_tags(tag1[b], batch["word_ids"][b], batch["n_words"][b])
+            batch_spans.append(decode_spans(wt))
+            golds.append([(s, e, pol) for (s, e, pol) in batch["gold_aspects"][b]])
+
+        # --- Stage 2: KAN-enhanced BIO over predicted spans -> final polarity ---
         sub_spans, queries = [], []
         for b in range(B):
             inst = id2inst.get(batch["instance_id"][b])
@@ -105,41 +121,34 @@ def predict_joint(model, loader, device: str = None) -> Tuple[List, List]:
             sub_spans.append(subs)
             queries.append(qs)
 
-        mod = dict(batch)
-        mod["aspect_spans"] = sub_spans
-        mod["aspect_queries"] = queries
-        mod.pop("aspect_triples", None)
-        out = model(mod, text_feats=text_feats, visual_feats=visual_feats)
-        asc = out["asc_logits"]  # rows flattened over (b, k) in instance order
+        s2 = dict(batch)
+        s2["aspect_spans"] = sub_spans
+        s2["aspect_queries"] = queries
+        s2.pop("aspect_triples", None)
+        tag2 = model(s2, text_feats=text_feats, visual_feats=visual_feats)["tag_logits"]
 
-        a = 0
         for b in range(B):
-            inst_preds = []
-            for (s, e, pol_bio) in batch_spans[b]:
-                pol = ID2POL[int(asc[a].argmax().item())] if a < asc.size(0) else pol_bio
-                a += 1
-                inst_preds.append((s, e, pol))
-            preds.append(inst_preds)
+            wt2 = decode_word_tags(tag2[b], batch["word_ids"][b], batch["n_words"][b])
+            preds.append([(s, e, _majority_pol(wt2, s, e)) for (s, e, _) in batch_spans[b]])
     return preds, golds
 
 
 @torch.no_grad()
 def predict_masc(model, loader, device: str = None) -> Tuple[List[str], List[str]]:
-    """Polarity on gold aspects via the ASC head (Table 3 MASC)."""
+    """Polarity on GOLD aspects, read from the unified BIO head over gold spans (Table 3 MASC)."""
     device = device or CONFIG.device
     model.eval()
     y_true, y_pred = [], []
     for batch in loader:
         batch = _to_device(batch, device)
-        out = model(batch)
-        asc = out["asc_logits"]
-        order = [(b, k) for b in range(len(batch["aspect_spans"])) for k in range(len(batch["aspect_spans"][b]))]
-        # asc rows must line up 1:1 with `order` (the flattened aspect list). If a future
-        # change drops aspects inside forward(), fail loudly rather than silently skew MASC.
-        assert asc.size(0) == len(order), f"asc rows {asc.size(0)} != aspects {len(order)}"
-        for a, (b, k) in enumerate(order):
-            y_true.append(ID2POL[batch["aspect_polarity"][b][k]])
-            y_pred.append(ID2POL[int(asc[a].argmax().item())])
+        tag = model(batch)["tag_logits"]  # gold aspect_spans -> KAN-enhanced tags over gold spans
+        for b in range(len(batch["aspect_spans"])):
+            for k, sp in enumerate(batch["aspect_spans"][b]):
+                s, e = sp[0], sp[1]
+                sub_ids = tag[b, s:e].argmax(-1).tolist()
+                pols = [ID2TAG[t].split("-", 1)[1] for t in sub_ids if ID2TAG[t] != "O"]
+                y_pred.append(max(set(pols), key=pols.count) if pols else "NEU")
+                y_true.append(ID2POL[batch["aspect_polarity"][b][k]])
     return y_true, y_pred
 
 
@@ -151,6 +160,23 @@ def evaluate_all(model, loader, device: str = None) -> Dict[str, Dict]:
         "mate": mate_prf(preds, golds),
         "masc": masc_acc_f1(yt, yp),
     }
+
+
+def _build_kg_and_entities(cfg):
+    """Mirror train.py's model construction so eval uses the same KG stream that training did."""
+    kg = None
+    sqlite = cfg.paths.kg_index / "kg.sqlite"
+    if sqlite.exists():
+        from kg import KnowledgeGraph
+
+        kg = KnowledgeGraph(sqlite_path=str(sqlite))
+    ent = None
+    nb = cfg.paths.conceptnet / "numberbatch-en.txt"
+    if nb.exists():
+        from kg_retrieval import EntityEmbedder
+
+        ent = EntityEmbedder.from_txt(str(nb))
+    return kg, ent
 
 
 if __name__ == "__main__":
@@ -174,6 +200,7 @@ if __name__ == "__main__":
     insts = load_split(data_dir, args.split)
     ds = TarkanDataset(insts, CONFIG, images_dir=images)
     loader = DataLoader(ds, batch_size=CONFIG.batch_size, collate_fn=collate_fn)
-    model = TarkanStudent(CONFIG).to(CONFIG.device)
+    kg, ent = _build_kg_and_entities(CONFIG)
+    model = TarkanStudent(CONFIG, kg=kg, entity_embedder=ent).to(CONFIG.device)
     load_checkpoint(model, args.checkpoint, map_location=CONFIG.device)
     log.info(evaluate_all(model, loader))

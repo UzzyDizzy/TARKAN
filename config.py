@@ -41,7 +41,9 @@ TAG2ID = {t: i for i, t in enumerate(BIO_TAGS)}
 ID2TAG = {i: t for t, i in TAG2ID.items()}
 NUM_BIO_TAGS = len(BIO_TAGS)  # 7
 
-# Sentiment polarities for the auxiliary span classifier (Eq. 23).
+# Sentiment polarities = the suffix of the unified BIO tags (Eq. 3). Used for
+# polarity decoding from BIO tags and for the MASC subtask. (No separate ASC head:
+# the updated paper §3.6 folds extraction + classification into one BIO head.)
 POLARITIES = ["POS", "NEU", "NEG"]
 POL2ID = {p: i for i, p in enumerate(POLARITIES)}
 ID2POL = {i: p for p, i in POL2ID.items()}
@@ -96,10 +98,9 @@ class TarkanConfig:
     grad_clip: float = 1.0         # Open-Q #7
     early_stop_patience: int = 5   # Open-Q #7
 
-    # ---- loss weights (Eq. 25 + auxiliary Lasc, Open-Q #1) ----
-    lambda1: float = 0.5           # Lrel weight
-    lambda2: float = 0.5           # Lkg weight
-    lambda3: float = 1.0           # Lasc weight; set 0.0 -> Eq.25-exact / "w/o ASC" ablation
+    # ---- loss weights (updated paper §3.7: L = L_tag + λ1 L_rel + λ2 L_kg) ----
+    lambda1: float = 0.5           # Lrel weight (teacher-guided aspect-visual relevance)
+    lambda2: float = 0.5           # Lkg weight (teacher-guided KG evidence filtering)
 
     # ---- KG retrieval/filter ----
     top_m_triples: int = 10        # paper §4.3 (top-M = 10)
@@ -115,18 +116,23 @@ class TarkanConfig:
     kan_spline_order: int = 3
 
     # ---- ablation toggles (Table 6) ----
-    use_teacher: bool = True          # --no-teacher
-    use_relevance: bool = True        # --no-relevance
-    use_kg_filter: bool = True        # --no-kg-filter
-    use_kg_stream: bool = True        # --no-kg-stream
-    use_visual_stream: bool = True    # --no-visual-stream
-
-    # ---- inference: joint-MABSA polarity source (queries.md A8) ----
-    # 'bio'  -> joint (span, polarity) both read from the BIO tagging head (text only) [default].
-    # 'asc'  -> span from BIO; FINAL polarity from the KAN-fused ASC head (Eq. 23) re-run on the
-    #           predicted spans (paper §3.7 inference). Needed to let visual/KG/KAN move the joint
-    #           metric in Tables 6 & 10. Does not affect MATE (spans) or the MASC subtask.
-    joint_polarity_source: str = "bio"
+    use_teacher: bool = True          # --no-teacher  ("w/o LLM teacher guidance")
+    use_relevance: bool = True        # --no-relevance ("w/o aspect-visual relevance")
+    use_kg_filter: bool = True        # --no-kg-filter ("w/o KG evidence filtering")
+    use_kg_stream: bool = True        # --no-kg-stream ("w/o KG stream")
+    use_visual_stream: bool = True    # --no-visual-stream ("w/o visual stream")
+    # Updated paper §3.6: the BIO tagging head runs on the KAN-fused multimodal token
+    # representation h̃_i = LayerNorm(h^t_i + KAN([h^t_i ; v_tilde ; g_tilde])). Setting this
+    # False feeds the BIO head text-only features -> reproduces the Table-6 ablation
+    # "w/o KAN-enhanced tag representation".
+    use_kan_tag_representation: bool = True
+    # Evidence dropout (training only): with this probability per instance, zero the
+    # per-token visual/KG evidence fed to the tag fusion. This teaches the unified BIO head
+    # to ALSO extract aspect spans from text alone (zero-evidence regime), which matches the
+    # two-stage inference's stage-1 extraction pass (no aspect evidence yet). Without it the
+    # head learns "B/I requires evidence" and fails to extract at stage-1 (recall ~0).
+    # Does not affect L_rel / L_kg (those supervise the relevance/usefulness scores upstream).
+    evidence_dropout: float = 0.5
 
     # ---- runtime ----
     seed: int = 42

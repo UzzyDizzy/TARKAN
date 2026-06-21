@@ -1,15 +1,15 @@
-"""TARKAN training objective (paper Eqs. 11, 16, 22, 24, 25).
+"""TARKAN training objective (updated paper §3.7, Eqs. 11, 16, 22).
 
     L_tag = - sum_i log p(b*_i | T, I)                                    (Eq. 22)
     L_rel = - sum_k [ r^T_k log r_k + (1-r^T_k) log(1-r_k) ]             (Eq. 11)
     L_kg  = - sum_k sum_q [ s^T_kq log s_kq + (1-s^T_kq) log(1-s_kq) ]   (Eq. 16)
-    L_asc = - sum_k log p(y*_k | a_k, T, I)                              (Eq. 24)
 
-    L = L_tag + λ1 L_rel + λ2 L_kg ( + λ3 L_asc )                        (Eq. 25 + aux)
+    L = L_tag + λ1 L_rel + λ2 L_kg                                       (Eq. for L)
 
-Eq. 25 as written omits L_asc, but §3.7 + Table 6 require it (Open-Q #1):
-set cfg.lambda3 = 0.0 to reproduce Eq.25-exact / the "w/o auxiliary ASC loss" ablation.
-cfg.use_teacher = False zeroes L_rel and L_kg ("w/o LLM teacher guidance").
+The updated methodology unifies aspect extraction + sentiment classification in the
+single BIO head (Eq. 21, run on the KAN-fused token representation), so there is no
+separate auxiliary span-ASC loss (the old L_asc / λ3 are removed). cfg.use_teacher =
+False zeroes L_rel and L_kg ("w/o LLM teacher guidance").
 """
 from __future__ import annotations
 
@@ -69,15 +69,8 @@ def kg_loss(
     return F.binary_cross_entropy(p, torch.cat(tgts), reduction="mean")
 
 
-def asc_loss(asc_logits: torch.Tensor, gold_polarity: torch.Tensor) -> torch.Tensor:
-    """Eq. 24. Span-level polarity CE over the KAN-fused representation."""
-    if asc_logits.numel() == 0 or gold_polarity.numel() == 0:
-        return asc_logits.new_zeros(())
-    return F.cross_entropy(asc_logits, gold_polarity, reduction="mean")
-
-
 def compute_losses(outputs: Dict, targets: Dict, cfg=CONFIG) -> Dict[str, torch.Tensor]:
-    """Returns dict with l_tag, l_rel, l_kg, l_asc, total (Eq. 25 + aux)."""
+    """Returns dict with l_tag, l_rel, l_kg, total (updated §3.7: L = L_tag + λ1 L_rel + λ2 L_kg)."""
     l_tag = tag_loss(outputs["tag_logits"], targets["bio_labels"])
 
     if cfg.use_teacher and cfg.use_relevance and cfg.use_visual_stream and "teacher_relevance" in targets:
@@ -92,10 +85,5 @@ def compute_losses(outputs: Dict, targets: Dict, cfg=CONFIG) -> Dict[str, torch.
     else:
         l_kg = l_tag.new_zeros(())
 
-    if cfg.lambda3 > 0 and "aspect_polarity" in targets:
-        l_asc = asc_loss(outputs["asc_logits"], targets["aspect_polarity"])
-    else:
-        l_asc = l_tag.new_zeros(())
-
-    total = l_tag + cfg.lambda1 * l_rel + cfg.lambda2 * l_kg + cfg.lambda3 * l_asc
-    return {"l_tag": l_tag, "l_rel": l_rel, "l_kg": l_kg, "l_asc": l_asc, "total": total}
+    total = l_tag + cfg.lambda1 * l_rel + cfg.lambda2 * l_kg
+    return {"l_tag": l_tag, "l_rel": l_rel, "l_kg": l_kg, "total": total}
